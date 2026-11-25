@@ -1,64 +1,72 @@
-// Entrypoint: read config, reconcile every RECONCILE_SECONDS (default 30), serve /healthz.
+// Entrypoint: reconcile every RECONCILE_SECONDS (default 30) and serve the plugin's API on PORT
+// (default 8080). Settings (ConfigMap cloudflare-tunnel-settings) and the API token (Secret
+// cloudflare-api) are read live from the cluster on every pass, so the manager starts, and
+// stays up, unconfigured: it reports what is missing until the Headlamp plugin saves it.
 //
-// Config (env; the API token from a Secret, the rest from a ConfigMap):
-//   CLOUDFLARE_API_TOKEN       Account: Cloudflare Tunnel Edit; Zone: Zone Read + DNS Edit
-//   CLOUDFLARE_ACCOUNT_ID      the account the tunnel lives in
-//   TUNNEL_NAME                the cluster's one tunnel, e.g. prod-nyc1 (unique per Cloudflare account: an existing tunnel of this name is ADOPTED)
-//   TUNNEL_ZONES               comma-separated zones routes may use, e.g. example.com,example.net
-//   TOKEN_SECRET_NAME          default cloudflared-token
-//   RECONCILE_SECONDS          default 30
-//   PORT                       health port, default 8080
+// Env (set by the Deployment, not by people):
+//   POD_NAMESPACE        the namespace of its TunnelRoutes, settings and Secrets
+//   TOKEN_SECRET_NAME    default cloudflared-token
+//   RECONCILE_SECONDS    default 30 (minimum 10)
+//   PORT                 default 8080
 
 import { createServer } from 'node:http'
 import { makeCloudflare } from './cloudflare.ts'
-import { inClusterConfig, makeKube } from './kube.ts'
+import { inClusterConfig, makeKube, type KubeConfig } from './kube.ts'
 import { reconcile } from './reconcile.ts'
+import { makeHandler, type LastPass } from './server.ts'
+import { parseSettings } from './settings.ts'
 
-function required(name: string): string {
-  const v = process.env[name]?.trim()
-  if (!v) {
-    console.error(`${name} is required`)
-    process.exit(2)
-  }
-  return v
-}
-
-const cfg = {
-  tunnelName: required('TUNNEL_NAME'),
-  zones: required('TUNNEL_ZONES').split(',').map((z) => z.trim().toLowerCase()).filter(Boolean),
-  tokenSecretName: process.env.TOKEN_SECRET_NAME?.trim() || 'cloudflared-token',
-}
-const cf = makeCloudflare({ token: required('CLOUDFLARE_API_TOKEN'), accountId: required('CLOUDFLARE_ACCOUNT_ID') })
-const kube = makeKube(inClusterConfig())
-const everyMs = Math.max(10, Number(process.env.RECONCILE_SECONDS) || 30) * 1000
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`)
 
-let last = { ok: false, at: '', error: '' as string, tunnelId: '' }
+let kubeCfg: KubeConfig
+try {
+  kubeCfg = inClusterConfig()
+} catch (e) {
+  console.error(`cloudflare-tunnel-manager: ${(e as Error).message}`)
+  process.exit(2)
+}
+const kube = makeKube(kubeCfg)
+const tokenSecretName = process.env.TOKEN_SECRET_NAME?.trim() || 'cloudflared-token'
+const everyMs = Math.max(10, Number(process.env.RECONCILE_SECONDS) || 30) * 1000
 
-async function pass(): Promise<void> {
+let last: LastPass | null = null
+let lastProblem = ''
+
+async function onePass(): Promise<void> {
+  const at = new Date().toISOString()
   try {
-    const r = await reconcile(cfg, cf, kube, log)
-    const bad = Object.entries(r.statuses).filter(([, s]) => s.state !== 'Ready')
-    for (const [name, s] of bad) log(`route ${name}: ${s.state} — ${s.message}`)
-    last = { ok: true, at: new Date().toISOString(), error: '', tunnelId: r.tunnelId }
+    const parsed = parseSettings(await kube.readSettings())
+    const token = await kube.readApiToken()
+    const missing = [...(token ? [] : ['the Cloudflare API token']), ...(parsed.ok ? [] : parsed.missing)]
+    if (missing.length || !token) {
+      const why = `not configured: missing ${missing.join(', ')}`
+      if (why !== lastProblem) log(why)
+      lastProblem = why
+      last = { at, ok: false, error: why, tunnel: null, zones: [], routes: 0 }
+      return
+    }
+    const cf = makeCloudflare({ token, accountId: parsed.settings.accountId })
+    const r = await reconcile({ ...parsed.settings, tokenSecretName }, cf, kube, log)
+    for (const [name, s] of Object.entries(r.statuses)) if (s.state !== 'Ready') log(`route ${name}: ${s.state} — ${s.message}`)
+    lastProblem = ''
+    last = { at, ok: true, error: '', tunnel: r.tunnel, zones: r.zones, routes: Object.keys(r.statuses).length }
   } catch (e) {
-    last = { ...last, ok: false, at: new Date().toISOString(), error: (e as Error).message }
-    log(`reconcile failed: ${(e as Error).message}`)
+    const why = (e as Error).message
+    if (why !== lastProblem) log(`reconcile failed: ${why}`)
+    lastProblem = why
+    last = { at, ok: false, error: why, tunnel: last?.tunnel ?? null, zones: last?.zones ?? [], routes: last?.routes ?? 0 }
   }
 }
 
-createServer((req, res) => {
-  if (req.url === '/healthz') {
-    // Liveness: the process is up and has completed at least one pass recently (the last
-    // pass may have failed — that is reported, not a reason to restart).
-    const fresh = last.at !== '' && Date.now() - Date.parse(last.at) < everyMs * 4
-    res.writeHead(fresh || last.at === '' ? 200 : 503, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(last))
-    return
-  }
-  res.writeHead(404).end()
-}).listen(Number(process.env.PORT) || 8080)
+// One pass at a time: a kick during a pass waits for it, then runs a fresh one.
+let running: Promise<void> = Promise.resolve()
+function pass(): Promise<void> {
+  running = running.then(onePass, onePass)
+  return running
+}
 
-log(`cloudflare-tunnel-manager: tunnel ${cfg.tunnelName}, zones ${cfg.zones.join(', ')}, every ${everyMs / 1000}s`)
+createServer(makeHandler({ kube, tokenSecretName, lastPass: () => last, kick: pass })).listen(Number(process.env.PORT) || 8080)
+
+log(`cloudflare-tunnel-manager: namespace ${kubeCfg.namespace}, every ${everyMs / 1000}s`)
 await pass()
 setInterval(() => void pass(), everyMs)

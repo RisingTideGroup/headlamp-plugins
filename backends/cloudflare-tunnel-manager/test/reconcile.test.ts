@@ -1,26 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { reconcile } from '../src/reconcile.ts'
+import { reconcile, TakeoverRefused } from '../src/reconcile.ts'
 import { makeCloudflare, type Cloudflare } from '../src/cloudflare.ts'
 import { makeKube, type Kube } from '../src/kube.ts'
 import { MANAGED_COMMENT, type DnsRecord, type IngressRule, type RouteSpec, type RouteStatus } from '../src/plan.ts'
 
-function fakes(opts: { tunnel?: boolean; routes: RouteSpec[]; dns?: DnsRecord[] }) {
+function fakes(opts: { tunnel?: boolean; routes: RouteSpec[]; dns?: DnsRecord[]; ingress?: IngressRule[]; owned?: string | null }) {
   const state = {
     tunnel: opts.tunnel ? { id: 't1', name: 'dev-cluster' } : null as null | { id: string; name: string },
-    ingress: [] as IngressRule[],
+    ingress: [...(opts.ingress ?? [])] as IngressRule[],
     dns: [...(opts.dns ?? [])],
     secret: null as string | null,
+    owned: opts.owned === undefined ? (opts.tunnel ? 't1' : null) : opts.owned,
     statuses: {} as Record<string, RouteStatus>,
     writes: [] as string[],
   }
   const cf = {
     async findTunnel() { return state.tunnel },
+    async getTunnel(id: string) { if (state.tunnel?.id !== id) throw new Error('404'); return state.tunnel },
     async createTunnel(name: string) { state.writes.push('createTunnel'); return (state.tunnel = { id: 't1', name }) },
     async tunnelToken() { return 'tok-1' },
     async getIngress() { return state.ingress },
     async putIngress(_id: string, ing: IngressRule[]) { state.writes.push('putIngress'); state.ingress = ing },
-    async zoneId(n: string) { return n === 'example.org' ? 'z1' : null },
+    async listZones() { return [{ id: 'z1', name: 'example.org' }, { id: 'z2', name: 'example.net' }] },
     async recordsByName(_z: string, n: string) { return state.dns.filter((d) => d.name === n) },
     async recordsPointingAt(_z: string, t: string) { return state.dns.filter((d) => d.content === t) },
     async createCname(z: string, name: string, t: string) { state.writes.push(`create ${name}`); state.dns.push({ id: name, zoneId: z, name, type: 'CNAME', content: t, comment: MANAGED_COMMENT }) },
@@ -29,12 +31,13 @@ function fakes(opts: { tunnel?: boolean; routes: RouteSpec[]; dns?: DnsRecord[] 
   const kube = {
     async listRoutes() { return opts.routes },
     async setStatus(n: string, s: RouteStatus) { state.statuses[n] = s },
-    async ensureTokenSecret(_n: string, t: string) { if (state.secret === t) return false; state.secret = t; state.writes.push('secret'); return true },
+    async ownedTunnelId() { return state.owned },
+    async ensureTokenSecret(_n: string, t: string, id: string) { if (state.secret === t && state.owned === id) return false; state.secret = t; state.owned = id; state.writes.push('secret'); return true },
   } as unknown as Kube
   return { cf, kube, state }
 }
 
-const CFG = { tunnelName: 'dev-cluster', zones: ['example.org'], tokenSecretName: 'cloudflared-token' }
+const CFG = { accountId: 'a'.repeat(32), tunnelId: '', tunnelName: 'dev-cluster', zones: ['example.org'], adopt: false, tokenSecretName: 'cloudflared-token' }
 const ROUTES: RouteSpec[] = [
   { name: 'portal', hostname: 'portal.example.org', service: 'http://portal.apps.svc.cluster.local:3000' },
   { name: 'proxy', hostname: '*.example.org', service: 'http://proxy.apps.svc.cluster.local:8080' },
@@ -76,6 +79,43 @@ test('a hand-built record blocks its route and is never touched', async () => {
   assert.ok(!state.writes.some((w) => w.includes('legacy')))
 })
 
+test('a tunnel with routes this cluster never wrote is refused before its token is written', async () => {
+  const { cf, kube, state } = fakes({
+    tunnel: true,
+    owned: null,
+    routes: ROUTES,
+    ingress: [{ hostname: 'app.easypanel.example', service: 'http://app:80' }, { service: 'http_status:404' }],
+  })
+  await assert.rejects(reconcile(CFG, cf, kube), (e: Error) => e instanceof TakeoverRefused && /app\.easypanel\.example/.test(e.message))
+  assert.deepEqual(state.writes, [], 'nothing written: no token, no ingress, no DNS')
+  assert.equal(state.secret, null)
+})
+
+test('TUNNEL_ADOPT=replace takes such a tunnel over; afterwards it is owned', async () => {
+  const { cf, kube, state } = fakes({
+    tunnel: true,
+    owned: null,
+    routes: ROUTES,
+    ingress: [{ hostname: 'app.easypanel.example', service: 'http://app:80' }, { service: 'http_status:404' }],
+  })
+  await reconcile({ ...CFG, adopt: true }, cf, kube)
+  assert.equal(state.owned, 't1')
+  assert.ok(!state.ingress.some((i) => i.hostname === 'app.easypanel.example'))
+  await reconcile(CFG, cf, kube) // owned now: no adopt flag needed
+})
+
+test('an empty unowned tunnel is taken without the flag; TUNNEL_ID selects it; no zone list = every visible zone', async () => {
+  const { cf, kube, state } = fakes({
+    tunnel: true,
+    owned: null,
+    routes: [{ name: 'n', hostname: 'a.example.net', service: 'http://x.y.svc.cluster.local:1' }],
+  })
+  const r = await reconcile({ ...CFG, tunnelId: 't1', tunnelName: '', zones: [] }, cf, kube)
+  assert.deepEqual(r.zones, ['example.org', 'example.net'])
+  assert.equal(r.statuses.n!.state, 'Ready')
+  assert.equal(state.owned, 't1')
+})
+
 // --- the HTTP clients ------------------------------------------------------------------
 
 test('cloudflare client: bearer auth, Cloudflare errors surfaced without the token', async () => {
@@ -92,18 +132,18 @@ test('cloudflare client: bearer auth, Cloudflare errors surfaced without the tok
 })
 
 test('kube client: creates the token Secret, updates it on change, leaves it when equal', async () => {
-  let stored: { data: Record<string, string>; metadata: { resourceVersion: string } } | null = null
+  let stored: { data: Record<string, string>; metadata: { resourceVersion: string; annotations?: Record<string, string> } } | null = null
   const calls: string[] = []
   const kube = makeKube({ server: 'https://k', namespace: 'cloudflare-tunnel', tokenFile: '/x' }, async (url, init) => {
     calls.push(`${init.method} ${url.replace('https://k', '')}`)
     if (init.method === 'GET') return stored ? new Response(JSON.stringify(stored)) : new Response('{}', { status: 404 })
-    const body = JSON.parse(String(init.body)) as { data: Record<string, string> }
-    stored = { data: body.data, metadata: { resourceVersion: '2' } }
+    const body = JSON.parse(String(init.body)) as { data: Record<string, string>; metadata: { annotations: Record<string, string> } }
+    stored = { data: body.data, metadata: { resourceVersion: '2', annotations: body.metadata.annotations } } as typeof stored
     return new Response(JSON.stringify(stored), { status: init.method === 'POST' ? 201 : 200 })
   }, () => 'sa-token')
-  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'a'), true)
-  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'a'), false)
-  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'b'), true)
+  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'a', 't1'), true)
+  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'a', 't1'), false)
+  assert.equal(await kube.ensureTokenSecret('cloudflared-token', 'b', 't1'), true)
   assert.deepEqual(calls, [
     'GET /api/v1/namespaces/cloudflare-tunnel/secrets/cloudflared-token',
     'POST /api/v1/namespaces/cloudflare-tunnel/secrets',
@@ -112,4 +152,6 @@ test('kube client: creates the token Secret, updates it on change, leaves it whe
     'PUT /api/v1/namespaces/cloudflare-tunnel/secrets/cloudflared-token',
   ])
   assert.equal(Buffer.from(stored!.data.token!, 'base64').toString(), 'b')
+  assert.equal(stored!.metadata.annotations!['tunnel.risingtidegroup.github.io/tunnel-id'], 't1')
+  assert.equal(await kube.ownedTunnelId('cloudflared-token'), 't1')
 })

@@ -47,6 +47,7 @@ declare module '@kinvolk/headlamp-plugin/lib/CommonComponents' {
   export function Loader(props: { title: string }): JSX.Element;
   export function StatusLabel(props: {
     status: 'success' | 'warning' | 'error' | '';
+    title?: string;
     children?: ReactNode;
   }): JSX.Element;
   export function NameValueTable(props: { rows: { name: ReactNode; value?: ReactNode }[] }): JSX.Element;

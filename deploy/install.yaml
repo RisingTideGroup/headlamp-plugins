@@ -126,6 +126,22 @@ rules:
 - apiGroups:
   - ""
   resourceNames:
+  - cloudflare-tunnel-settings
+  resources:
+  - configmaps
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resourceNames:
+  - cloudflare-api
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resourceNames:
   - cloudflared-token
   resources:
   - secrets
@@ -138,6 +154,81 @@ rules:
   - secrets
   verbs:
   - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudflare-tunnel-operator
+rules:
+- apiGroups:
+  - tunnel.risingtidegroup.github.io
+  resources:
+  - tunnelroutes
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+  - update
+  - delete
+- apiGroups:
+  - ""
+  resourceNames:
+  - cloudflare-tunnel-manager
+  - http:cloudflare-tunnel-manager:http
+  resources:
+  - services/proxy
+  verbs:
+  - get
+  - create
+- apiGroups:
+  - ""
+  resourceNames:
+  - cloudflare-tunnel-settings
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resourceNames:
+  - cloudflare-api
+  resources:
+  - secrets
+  verbs:
+  - patch
+- apiGroups:
+  - apps
+  resourceNames:
+  - cloudflared
+  resources:
+  - deployments
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resourceNames:
+  - cloudflared
+  resources:
+  - deployments/scale
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -154,15 +245,17 @@ subjects:
   namespace: cloudflare-tunnel
 ---
 apiVersion: v1
-data:
-  RECONCILE_SECONDS: "30"
-  TOKEN_SECRET_NAME: cloudflared-token
-  TUNNEL_NAME: ""
-  TUNNEL_ZONES: ""
-kind: ConfigMap
+kind: Service
 metadata:
   name: cloudflare-tunnel-manager
   namespace: cloudflare-tunnel
+spec:
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: cloudflare-tunnel-manager
 ---
 apiVersion: v1
 kind: Service
@@ -202,27 +295,26 @@ spec:
       - env:
         - name: NODE_EXTRA_CA_CERTS
           value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        - name: TOKEN_SECRET_NAME
+          value: cloudflared-token
+        - name: RECONCILE_SECONDS
+          value: "30"
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        envFrom:
-        - configMapRef:
-            name: cloudflare-tunnel-manager
-        - secretRef:
-            name: cloudflare-api
         image: ghcr.io/risingtidegroup/cloudflare-tunnel-manager:main
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
             path: /healthz
-            port: health
+            port: http
           initialDelaySeconds: 30
           periodSeconds: 30
         name: cloudflare-tunnel-manager
         ports:
         - containerPort: 8080
-          name: health
+          name: http
         resources:
           limits:
             cpu: 200m
@@ -373,6 +465,33 @@ spec:
       - emptyDir:
           sizeLimit: 64Mi
         name: tmp
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cloudflare-tunnel-manager-from-apiserver
+  namespace: cloudflare-tunnel
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflare-tunnel-manager
+  ingress:
+  - fromEntities:
+    - kube-apiserver
+    - host
+    - remote-node
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s-app: konnectivity-agent
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

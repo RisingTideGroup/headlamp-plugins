@@ -1,19 +1,22 @@
 # cloudflare-tunnel-manager — keeps the cluster's ONE Cloudflare Tunnel in step with its
-# TunnelRoutes (source: backends/cloudflare-tunnel-manager in this repo). It creates or adopts the tunnel named TUNNEL_NAME, writes the
-# tunnel's token into Secret cloudflared-token (which cloudflared.yaml runs with), pushes the
-# routes to the tunnel, and creates/deletes the DNS records — its own only.
+# TunnelRoutes (source: backends/cloudflare-tunnel-manager in this repo). It finds, creates or
+# (only when told to) takes over the tunnel, writes the tunnel's token into Secret
+# cloudflared-token (which cloudflared.yaml runs with), pushes the routes to the tunnel, and
+# creates/deletes the DNS records — its own only.
 #
-# A route, editable from Headlamp (Custom Resources → TunnelRoute):
+# Configured from Headlamp (sidebar → Cloudflare Tunnel → Config), which writes:
+#   Secret    cloudflare-api              CLOUDFLARE_API_TOKEN (write-only from the UI)
+#   ConfigMap cloudflare-tunnel-settings  CLOUDFLARE_ACCOUNT_ID, TUNNEL_ID | TUNNEL_NAME,
+#                                         TUNNEL_ZONES (optional), TUNNEL_ADOPT
+# Neither is in this bundle, so re-applying it never resets them. The manager reads both live
+# every pass and runs unconfigured (reporting what is missing) until they exist.
+# The token's permissions: Account → Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit.
+#
+# A rule (Headlamp → Cloudflare Tunnel → Add Tunnel Rule, or kubectl):
 #   apiVersion: tunnel.risingtidegroup.github.io/v1alpha1
 #   kind: TunnelRoute
 #   metadata: { name: portal, namespace: cloudflare-tunnel }
 #   spec: { hostname: portal.example.com, service: http://portal.apps.svc.cluster.local:3000 }
-#
-# Secret (never in git), created once by someone with Cloudflare access:
-#   kubectl -n cloudflare-tunnel create secret generic cloudflare-api \
-#     --from-literal=CLOUDFLARE_API_TOKEN=<token> --from-literal=CLOUDFLARE_ACCOUNT_ID=<account id>
-# The token's permissions: Account → Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit —
-# restricted to the zones in TUNNEL_ZONES.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -66,7 +69,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata: { name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
 ---
-# Least privilege: read routes, write their status, and manage ONE Secret by name.
+# Least privilege: read routes and write their status; read its settings and the API token
+# (by name); manage ONE Secret, the cloudflared token, by name.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: { name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
@@ -77,6 +81,14 @@ rules:
   - apiGroups: [tunnel.risingtidegroup.github.io]
     resources: [tunnelroutes/status]
     verbs: [get, patch, update]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [cloudflare-tunnel-settings]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cloudflare-api]
+    verbs: [get]
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [cloudflared-token]
@@ -91,18 +103,6 @@ metadata: { name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: cloudflare-tunnel-manager }
 subjects:
   - { kind: ServiceAccount, name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
----
-apiVersion: v1
-kind: ConfigMap
-metadata: { name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
-data:
-  # REQUIRED — set both before the manager will start (it exits "<NAME> is required").
-  # TUNNEL_NAME must be unique in the Cloudflare account: a tunnel of that name is ADOPTED.
-  # Set them with a kustomize patch, or: kubectl -n cloudflare-tunnel edit configmap cloudflare-tunnel-manager
-  TUNNEL_NAME: ""
-  TUNNEL_ZONES: ""   # comma-separated, e.g. example.com,example.net
-  TOKEN_SECRET_NAME: cloudflared-token
-  RECONCILE_SECONDS: "30"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -127,16 +127,15 @@ spec:
         - name: cloudflare-tunnel-manager
           image: ghcr.io/risingtidegroup/cloudflare-tunnel-manager:main
           imagePullPolicy: Always
-          envFrom:
-            - configMapRef: { name: cloudflare-tunnel-manager }
-            - secretRef: { name: cloudflare-api }
           env:
             - { name: NODE_EXTRA_CA_CERTS, value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt }
+            - { name: TOKEN_SECRET_NAME, value: cloudflared-token }
+            - { name: RECONCILE_SECONDS, value: "30" }
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
-          ports: [{ name: health, containerPort: 8080 }]
+          ports: [{ name: http, containerPort: 8080 }]
           livenessProbe:
-            httpGet: { path: /healthz, port: health }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 30
             periodSeconds: 30
           resources:
@@ -146,6 +145,16 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
+---
+# The plugin's API (status; accounts, tunnels, zones from Cloudflare). Reached only through the
+# API server's service proxy — /api/v1/namespaces/cloudflare-tunnel/services/http:cloudflare-tunnel-manager:http/proxy/…
+# — so callers need RBAC services/proxy here; apiserver-egress.yaml admits nothing else.
+apiVersion: v1
+kind: Service
+metadata: { name: cloudflare-tunnel-manager, namespace: cloudflare-tunnel }
+spec:
+  selector: { app.kubernetes.io/name: cloudflare-tunnel-manager }
+  ports: [{ name: http, port: 8080, targetPort: http }]
 ---
 # Reaches the Cloudflare API (internet) and the API server (apiserver-egress.yaml).
 apiVersion: networking.k8s.io/v1
@@ -160,3 +169,40 @@ spec:
             cidr: 0.0.0.0/0
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
       ports: [{ protocol: TCP, port: 443 }]
+---
+# For the people who use the Headlamp page (cluster-admin already has all of it). Not bound:
+#   kubectl create clusterrolebinding cloudflare-tunnel-operator-<who> \
+#     --clusterrole cloudflare-tunnel-operator --user <who>
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: cloudflare-tunnel-operator }
+rules:
+  - apiGroups: [tunnel.risingtidegroup.github.io]
+    resources: [tunnelroutes]
+    verbs: [get, list, watch, create, patch, update, delete]
+  - apiGroups: [""]
+    resources: [services/proxy]
+    resourceNames: [cloudflare-tunnel-manager, "http:cloudflare-tunnel-manager:http"]
+    verbs: [get, create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [cloudflare-tunnel-settings]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [configmaps, secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cloudflare-api]
+    verbs: [patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [cloudflared]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    resourceNames: [cloudflared]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [list]

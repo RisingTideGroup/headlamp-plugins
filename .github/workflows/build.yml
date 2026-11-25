@@ -148,7 +148,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: "Start check: non-root, and refuses to run without its settings"
+      - name: "Start check: non-root, and exits cleanly outside a cluster"
         run: |
           set -uo pipefail
           uid=$(docker run --rm --entrypoint id "$IMAGE:main" -u)
@@ -156,7 +156,7 @@ jobs:
           # Steps run under bash -e; capture the expected non-zero exit instead of aborting on it.
           code=0; out=$(docker run --rm "$IMAGE:main" 2>&1) || code=$?
           echo "$out"
-          [ "$code" = 2 ] && grep -q 'is required' <<<"$out" || { echo "::error::expected exit 2 '<NAME> is required', got $code"; exit 1; }
+          [ "$code" = 2 ] && grep -q 'not running in a cluster' <<<"$out" || { echo "::error::expected exit 2 'not running in a cluster', got $code"; exit 1; }
       - name: Install Trivy (pinned binary)
         run: |
           bin="$RUNNER_TEMP/trivy"; mkdir -p "$bin"
