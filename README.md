@@ -9,16 +9,22 @@ Rising Tide's [Headlamp](https://headlamp.dev) plugins, and the Headlamp image b
 
 ## Images
 
-Built by [`.github/workflows/build.yml`](.github/workflows/build.yml) on every push to `main`,
-after every plugin's audit, typecheck, lint, tests and build pass:
+Built by [`.github/workflows/build.yml`](.github/workflows/build.yml). Every run (pull requests
+included) checks each plugin (audit, typecheck, lint, tests, build), runs Headlamp's backend
+tests on the exact commit being built, builds both images, starts Headlamp and requires it to
+serve every plugin, and Trivy-scans both images (MEDIUM or higher fails). Only pushes to `main`
+(or a manual run on `main`) publish:
 
 | Image | Contents | Tags |
 |---|---|---|
 | `ghcr.io/risingtidegroup/headlamp` | Headlamp from [`headlamp.env`](headlamp.env) with every plugin here baked into `/headlamp/plugins` | `<HEADLAMP_TAG>` (moves), `<HEADLAMP_TAG>-<headlamp sha7>-<this repo sha7>` (pinned) |
 | `ghcr.io/risingtidegroup/headlamp-plugins` | Every plugin under `/plugins/<name>/`, for an initContainer in any other Headlamp | `main`, `sha-<sha>` |
 
-A change to any plugin, or to `headlamp.env`, rebuilds both. To build Headlamp from another
-source (e.g. a Rising Tide fork), edit `headlamp.env`.
+A change to any plugin, or to `headlamp.env`, rebuilds both. Headlamp comes from
+[`RisingTideGroup/headlamp`](https://github.com/RisingTideGroup/headlamp) branch `rtg/main`:
+upstream Headlamp `main` (unreleased) plus our fixes, listed in [`headlamp.env`](headlamp.env).
+To pick up new upstream changes, sync the fork's `main`, rebase `rtg/main` onto it, then re-run
+this workflow (Actions → Build → Run workflow); a moved `rtg/main` alone does not trigger a build.
 
 The first publish of each image creates a GHCR package; set its visibility to **public** once
 (Organization → Packages → the package → Package settings).
