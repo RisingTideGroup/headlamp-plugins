@@ -1,0 +1,46 @@
+{
+  "name": "cloudflare-tunnel-manager",
+  "version": "0.1.0",
+  "description": "Headlamp plugin for cloudflare-tunnel-manager: the cluster's Cloudflare Tunnel (start, stop, scale) and its TunnelRoutes (list, create, delete, state).",
+  "private": true,
+  "scripts": {
+    "build": "headlamp-plugin build",
+    "lint": "headlamp-plugin lint",
+    "tsc": "headlamp-plugin tsc",
+    "test": "headlamp-plugin test",
+    "package": "headlamp-plugin package"
+  },
+  "keywords": [
+    "headlamp",
+    "headlamp-plugin",
+    "kubernetes",
+    "cloudflare"
+  ],
+  "prettier": "@headlamp-k8s/eslint-config/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@headlamp-k8s",
+      "prettier",
+      "plugin:jsx-a11y/recommended"
+    ]
+  },
+  "overrides": {
+    "typescript": "5.6.2",
+    "vitest": "4.1.12",
+    "@vitest/coverage-istanbul": "4.1.12",
+    "webpack-dev-middleware": "7.4.5",
+    "glob": "14.0.6",
+    "minimatch": "11.0.9",
+    "rimraf": "6.1.4",
+    "@vitest/mocker": "4.1.12",
+    "i18next": "26.7.2"
+  },
+  "devDependencies": {
+    "@kinvolk/headlamp-plugin": "0.14.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RisingTideGroup/headlamp-plugins",
+    "directory": "plugins/cloudflare-tunnel-manager"
+  }
+}

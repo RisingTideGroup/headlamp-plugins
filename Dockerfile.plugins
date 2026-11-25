@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+# Every plugin in this repo, built, under /plugins/<name>/{main.js,package.json}.
+# The workflow builds the plugins first and passes them in as the `plugins` build context.
+#
+# Use it in any Headlamp as an initContainer that copies into Headlamp's plugins directory:
+#   initContainers:
+#     - name: plugins
+#       image: ghcr.io/risingtidegroup/headlamp-plugins:main
+#       volumeMounts: [{ name: plugins, mountPath: /target }]
+FROM busybox:1.37.0
+COPY --from=plugins . /plugins
+USER 65532:65532
+CMD ["cp", "-R", "/plugins/.", "/target/"]
