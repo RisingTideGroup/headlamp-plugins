@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # cloudflare-tunnel-manager — no runtime dependencies; Node 24 runs the TypeScript directly.
 #   docker build -t cloudflare-tunnel-manager backends/cloudflare-tunnel-manager
-FROM node:24-alpine
+FROM node:26-alpine
 # Pending Alpine security fixes; and no package managers at runtime (nothing is installed:
 # the manager has no dependencies), which also keeps their own dependency trees out of the scan.
 RUN apk upgrade --no-cache \
