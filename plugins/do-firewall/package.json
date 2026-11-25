@@ -24,10 +24,10 @@
     "@mui/material": "5.18.0",
     "@types/react": "18.3.31",
     "esbuild": "0.28.2",
-    "oxlint": "1.93.0",
+    "oxlint": "1.94.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   }
 }
