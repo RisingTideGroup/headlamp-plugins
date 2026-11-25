@@ -18,3 +18,19 @@ spec:
   egress:
     - toEntities: [kube-apiserver]
       toPorts: [{ ports: [{ port: "443", protocol: TCP }, { port: "6443", protocol: TCP }] }]
+---
+# The manager's API is for the plugin, through the API server's service proxy only. On DOKS
+# that proxied connection reaches the pod from the control plane (kube-apiserver), via the
+# konnectivity agent (kube-system), or from the node (host / remote-node), depending on the
+# network path; those are admitted on 8080 and no other pod is.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: cloudflare-tunnel-manager-from-apiserver, namespace: cloudflare-tunnel }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: cloudflare-tunnel-manager } }
+  ingress:
+    - fromEntities: [kube-apiserver, host, remote-node]
+      toPorts: [{ ports: [{ port: "8080", protocol: TCP }] }]
+    - fromEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: kube-system, k8s-app: konnectivity-agent }
+      toPorts: [{ ports: [{ port: "8080", protocol: TCP }] }]

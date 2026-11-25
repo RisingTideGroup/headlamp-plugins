@@ -20,45 +20,64 @@ policies and the Cilium API-server egress.
    ```
    Or, to layer your own changes, use this directory as a kustomize base:
    `https://github.com/RisingTideGroup/headlamp-plugins//deploy?ref=main`.
-3. Name the tunnel and its zones (both required; the manager waits until they are set):
-   ```bash
-   kubectl -n cloudflare-tunnel patch configmap cloudflare-tunnel-manager --type merge \
-     -p '{"data":{"TUNNEL_NAME":"<unique name, e.g. prod-nyc1>","TUNNEL_ZONES":"<example.com,example.net>"}}'
-   ```
-   Then give it the Cloudflare API token (once, never in git):
-   ```bash
-   kubectl -n cloudflare-tunnel create secret generic cloudflare-api \
-     --from-literal=CLOUDFLARE_API_TOKEN=<token> --from-literal=CLOUDFLARE_ACCOUNT_ID=<account id>
-   ```
-   The token's permissions: Account → Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit,
-   for the zones in `TUNNEL_ZONES` only.
-4. Route Headlamp through the tunnel. Until this exists Headlamp is reachable only with
-   `kubectl -n headlamp port-forward svc/headlamp 4466`:
-   ```yaml
-   apiVersion: tunnel.risingtidegroup.github.io/v1alpha1
-   kind: TunnelRoute
-   metadata: { name: headlamp, namespace: cloudflare-tunnel }
-   spec: { hostname: <headlamp host>, service: http://headlamp.headlamp.svc.cluster.local:4466 }
-   ```
-   Put that hostname behind a Cloudflare Access policy.
-   Then restart the manager once so it reads the settings:
-   `kubectl -n cloudflare-tunnel rollout restart deploy/cloudflare-tunnel-manager`. Further routes are added from
-   Headlamp → **Cloudflare Tunnel** → Add route.
+3. Open Headlamp → **Cloudflare Tunnel** (sidebar), then in **Config**:
+   1. paste a Cloudflare **API token** and press **Connect** (permissions: Account →
+      Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit). It is stored in Secret
+      `cloudflare-api` and never shown again;
+   2. pick the **account**;
+   3. pick a **tunnel**, or **+ Create a new tunnel** with a name unique in the account;
+   4. **Save**.
+
+   A tunnel that already routes hostnames this cluster did not create (EasyPanel's, another
+   cluster's) is refused unless you tick **Replace its existing routes**: taking it over
+   replaces ALL of its routes and makes this cluster's `cloudflared` one of its connectors.
+   Use a new tunnel for anything that is already serving traffic.
+4. **Add Tunnel Rule**: subdomain, domain (the zones the token can see), the cluster Service and
+   its port. The manager writes the tunnel route and the DNS record, and each rule shows its state:
+   Ready, Invalid, or Conflict (the hostname's DNS already points elsewhere; it is left alone).
+   Route Headlamp itself first (`headlamp / headlamp`, port `4466`) and put that hostname behind
+   a Cloudflare Access policy.
+5. **Start Tunnel** / **Stop Tunnel** scales `cloudflared` (2 / 0).
 
 Until the manager has written Secret `cloudflared-token`, the `cloudflared` pods wait in
 `CreateContainerConfigError` and start by themselves once it exists.
 
+Without the UI, the same settings are one Secret and one ConfigMap:
+
+```bash
+kubectl -n cloudflare-tunnel create secret generic cloudflare-api --from-literal=CLOUDFLARE_API_TOKEN=<token>
+kubectl -n cloudflare-tunnel create configmap cloudflare-tunnel-settings \
+  --from-literal=CLOUDFLARE_ACCOUNT_ID=<32-hex account id> --from-literal=TUNNEL_NAME=<unique name>
+```
+
 ## Settings
+
+All read live by the manager every pass (no restart). Neither object is part of the bundle, so
+re-applying it never resets them.
 
 | Setting | Where | Default |
 |---|---|---|
-| Tunnel name (**required**; unique per Cloudflare account, an existing tunnel of that name is adopted) | ConfigMap `cloudflare-tunnel-manager`, `TUNNEL_NAME` | empty |
-| Zones a route may use (**required**) | same, `TUNNEL_ZONES` (comma-separated) | empty |
-| Reconcile interval | same, `RECONCILE_SECONDS` | `30` |
-| Connector replicas | Deployment `cloudflared`, or Headlamp → Cloudflare Tunnel → Scale / Stop | `2` |
+| API token (**required**) | Secret `cloudflare-api`, `CLOUDFLARE_API_TOKEN` | none |
+| Account (**required**) | ConfigMap `cloudflare-tunnel-settings`, `CLOUDFLARE_ACCOUNT_ID` | none |
+| Tunnel (**required**): an existing one by id, or a name to find/create | same, `TUNNEL_ID` or `TUNNEL_NAME` | none |
+| Zones a rule may use | same, `TUNNEL_ZONES` (comma-separated) | every zone the token can see |
+| Take over a tunnel that already has routes | same, `TUNNEL_ADOPT=replace` | off |
+| Reconcile interval | Deployment env `RECONCILE_SECONDS` | `30` |
+| Connector replicas | Deployment `cloudflared`, or Start / Stop | `2` |
 
-Override them with a kustomize patch on this base rather than editing `install.yaml`. A
-re-apply of the bundle resets the connector to 2 replicas.
+A re-apply of the bundle does not undo Stop: `kubectl apply` leaves `replicas` alone while the
+manifest's value is unchanged.
+
+## Who may use the page
+
+Every action is a Kubernetes API call with the signed-in person's own credentials.
+`cluster-admin` has all of it; for anyone else bind the `cloudflare-tunnel-operator` ClusterRole
+(TunnelRoutes; the manager's service proxy; the settings ConfigMap and token Secret by name;
+`cloudflared`'s scale; listing Services):
+
+```bash
+kubectl create clusterrolebinding cloudflare-tunnel-operator-<who> --clusterrole cloudflare-tunnel-operator --user <who>
+```
 
 ## Upgrades
 
