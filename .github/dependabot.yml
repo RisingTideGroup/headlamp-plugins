@@ -8,6 +8,17 @@ updates:
       - /backends/*
     schedule:
       interval: weekly
+    # Plugins compile against the React and MUI that Headlamp hands them at runtime
+    # (pluginLib: React 18, MUI 5 in Headlamp 0.46). Their majors move only when Headlamp's do.
+    ignore:
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/react"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@mui/material"
+        update-types: [version-update:semver-major]
     groups:
       minor-and-patch:
         update-types: [minor, patch]
