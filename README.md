@@ -5,6 +5,7 @@ Rising Tide's [Headlamp](https://headlamp.dev) plugins, and the Headlamp image b
 | Plugin | What it does |
 |---|---|
 | [`cloudflare-tunnel-manager`](plugins/cloudflare-tunnel-manager) | Sidebar → **Cloudflare Tunnel**: the cluster's tunnel (start, stop, scale the `cloudflared` connector) and its `TunnelRoute`s (list with state, add, delete). Needs [cloudflare-tunnel-manager](https://github.com/Network-Integration-Specialists-Inc/nis-mcp/tree/main/platform/cloudflare-tunnel-manager) in the cluster. |
+| [`do-firewall`](plugins/do-firewall) | Sidebar → **DO Firewall** (in a cluster and on the home screen): the DigitalOcean Kubernetes control-plane firewall allowlist, which DO's control panel does not show. Labels per address, NAT gateway locked, public-IPv4 validation, review before save. Needs each person's own DigitalOcean token. |
 
 ## Images
 
@@ -25,7 +26,10 @@ The first publish of each image creates a GHCR package; set its visibility to **
 ## Add a plugin
 
 1. `plugins/<name>/` with a `package.json` whose scripts include `build`, `tsc`, `lint` and
-   `test` (`npx @kinvolk/headlamp-plugin create <name>` gives that shape).
+   `test` (`npx @kinvolk/headlamp-plugin create <name>` gives that shape). `build` writes
+   `dist/main.js`. The shipped `package.json` is `dist/package.json` if the build writes one,
+   else the plugin's own; either must declare `devDependencies["@kinvolk/headlamp-plugin"]`
+   (the plugin-API level), or Headlamp skips the plugin and the workflow fails.
 2. Push. The workflow discovers it, checks it, and bakes it into the image.
 
 ## Develop
@@ -38,4 +42,6 @@ npm start                                                  # hot reload into a r
 ```
 
 Plugins run in the browser only, with the signed-in person's own Kubernetes token and RBAC.
-They hold no credentials and run no server-side code.
+They run no server-side code and store no credentials in the image or the cluster.
+`do-firewall` also takes the person's own DigitalOcean token, keeps it in that browser tab
+only (sessionStorage) and sends it only to `api.digitalocean.com`.

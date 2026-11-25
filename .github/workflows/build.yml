@@ -58,10 +58,16 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # Headlamp loads <name>/main.js + <name>/package.json. A plugin built without the
+      # headlamp-plugin CLI writes its own dist/package.json (Headlamp refuses one whose
+      # devDependencies lack @kinvolk/headlamp-plugin); otherwise the source package.json ships.
       - name: Stage the built plugin
         run: |
-          mkdir -p "$RUNNER_TEMP/out/${{ matrix.plugin }}"
-          cp dist/main.js package.json "$RUNNER_TEMP/out/${{ matrix.plugin }}/"
+          out="$RUNNER_TEMP/out/${{ matrix.plugin }}"
+          mkdir -p "$out"
+          cp dist/main.js "$out/"
+          if [ -f dist/package.json ]; then cp dist/package.json "$out/"; else cp package.json "$out/"; fi
+          node -e 'const p=require(process.argv[1]); if(!p.devDependencies?.["@kinvolk/headlamp-plugin"]){console.error("::error::package.json lacks devDependencies[\"@kinvolk/headlamp-plugin\"]; Headlamp will not load it");process.exit(1)}' "$out/package.json"
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.plugin }}
