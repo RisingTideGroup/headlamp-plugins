@@ -135,7 +135,7 @@ jobs:
           npm test
       - name: Image name
         run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/${{ matrix.backend }}" >> "$GITHUB_ENV"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build
         uses: docker/build-push-action@v6
         with:
@@ -280,7 +280,7 @@ jobs:
           echo "IMAGE=ghcr.io/$owner/headlamp" >> "$GITHUB_ENV"
           echo "BUNDLE=ghcr.io/$owner/headlamp-plugins" >> "$GITHUB_ENV"
           echo "PIN=${HEADLAMP_TAG}-${HEADLAMP_SHA::7}-$(git -C plugins-repo rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build the plugins image
         uses: docker/build-push-action@v6
         with:
