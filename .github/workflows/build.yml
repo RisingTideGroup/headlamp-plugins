@@ -153,7 +153,8 @@ jobs:
           set -uo pipefail
           uid=$(docker run --rm --entrypoint id "$IMAGE:main" -u)
           [ "$uid" != "0" ] || { echo "::error::image runs as root"; exit 1; }
-          out=$(docker run --rm "$IMAGE:main" 2>&1); code=$?
+          # Steps run under bash -e; capture the expected non-zero exit instead of aborting on it.
+          code=0; out=$(docker run --rm "$IMAGE:main" 2>&1) || code=$?
           echo "$out"
           [ "$code" = 2 ] && grep -q 'is required' <<<"$out" || { echo "::error::expected exit 2 '<NAME> is required', got $code"; exit 1; }
       - name: Install Trivy (pinned binary)
