@@ -4,7 +4,7 @@ One bundle, built only from public images:
 
 | Workload | Namespace | Image |
 |---|---|---|
-| Headlamp, with every plugin in this repo (Cloudflare Tunnel, DigitalOcean, …) | `nis-headlamp` | `ghcr.io/risingtidegroup/headlamp:pivotal-v0.46.0` (this repo) |
+| Headlamp, with every plugin in this repo (Cloudflare Tunnel, DigitalOcean, …) | `nis-headlamp` | `ghcr.io/risingtidegroup/headlamp:rtg-main` (this repo) |
 | `cloudflare-tunnel-manager`: creates or adopts the cluster's ONE tunnel, writes its token, keeps routes and DNS in step with `TunnelRoute` objects | `nis-ingress` | `ghcr.io/network-integration-specialists-inc/cloudflare-tunnel-manager:main` (nis-mcp) |
 | `cloudflared`: the tunnel connector; it carries the traffic | `nis-ingress` | `cloudflare/cloudflared:2026.11.2` |
 

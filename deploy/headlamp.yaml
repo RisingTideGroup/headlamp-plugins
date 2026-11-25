@@ -1,4 +1,4 @@
-# Headlamp, built from pivotal-crew/headlamp@pivotal/v0.46.0 (our DigitalOcean changes:
+# Headlamp, built from RisingTideGroup/headlamp@rtg/main (upstream main + our DigitalOcean changes:
 # /me for opaque tokens via SelfSubjectReview, replayable proxied bodies) with our plugins
 # (Cloudflare Tunnel, …) baked into /headlamp/plugins, by RisingTideGroup/headlamp-plugins
 # (its headlamp.env picks the Headlamp source). The tag moves with each plugin change, so the
@@ -32,7 +32,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: headlamp
-          image: ghcr.io/risingtidegroup/headlamp:pivotal-v0.46.0
+          image: ghcr.io/risingtidegroup/headlamp:rtg-main
           imagePullPolicy: Always
           args: [-in-cluster, -plugins-dir=/headlamp/plugins]
           ports: [{ name: http, containerPort: 4466 }]
