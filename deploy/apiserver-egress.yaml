@@ -1,0 +1,20 @@
+# Egress to the Kubernetes API server for Headlamp and cloudflare-tunnel-manager. A plain
+# NetworkPolicy cannot name the API server reliably, so this uses Cilium's kube-apiserver
+# entity. Needs Cilium (DOKS runs it): kubectl get crd ciliumnetworkpolicies.cilium.io
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: headlamp-to-apiserver, namespace: nis-headlamp }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: headlamp } }
+  egress:
+    - toEntities: [kube-apiserver]
+      toPorts: [{ ports: [{ port: "443", protocol: TCP }, { port: "6443", protocol: TCP }] }]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: cloudflare-tunnel-manager-to-apiserver, namespace: nis-ingress }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: cloudflare-tunnel-manager } }
+  egress:
+    - toEntities: [kube-apiserver]
+      toPorts: [{ ports: [{ port: "443", protocol: TCP }, { port: "6443", protocol: TCP }] }]

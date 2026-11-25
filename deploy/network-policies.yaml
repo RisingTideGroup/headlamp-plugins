@@ -1,0 +1,75 @@
+# Default-deny in both namespaces, then one allow per edge. "The internet" means 0.0.0.0/0
+# MINUS every private range, so it never reaches another pod, the nodes or cloud metadata.
+#
+#   cloudflared               -> internet (Cloudflare edge), headlamp:4466
+#   cloudflare-tunnel-manager -> internet :443 (Cloudflare API; cloudflare-tunnel-manager.yaml),
+#                                the API server (apiserver-egress.yaml)
+#   headlamp                  <- cloudflared; -> the API server (apiserver-egress.yaml)
+#   everyone                  -> kube-dns :53
+# More routes through the tunnel need their own allow from cloudflared (NetworkPolicies add up):
+# add a policy in nis-ingress for cloudflared's egress and one in the target namespace for ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: nis-ingress }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: nis-ingress }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: cloudflared-egress, namespace: nis-ingress }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: cloudflared } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nis-headlamp } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: headlamp } }
+      ports: [{ protocol: TCP, port: 4466 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: nis-headlamp }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: nis-headlamp }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: ingress-from-cloudflared, namespace: nis-headlamp }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: headlamp } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nis-ingress } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: cloudflared } }
+      ports: [{ protocol: TCP, port: 4466 }]

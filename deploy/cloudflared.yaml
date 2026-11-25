@@ -1,0 +1,50 @@
+# cloudflared — the connector for the cluster's ONE Cloudflare Tunnel. Remotely managed:
+# routes live on the tunnel in Cloudflare, and the pod carries only the tunnel token.
+#
+# Nobody sets either by hand: cloudflare-tunnel-manager (cloudflare-tunnel-manager.yaml) creates or adopts the
+# tunnel, writes its token into Secret cloudflared-token, and keeps its routes and DNS in step
+# with the TunnelRoute objects. Scale this Deployment to start (>= 1) or stop (0) the tunnel.
+# Until cloudflare-tunnel-manager has written the token, these pods wait in CreateContainerConfigError
+# and start by themselves once it exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: nis-ingress
+  labels: { app.kubernetes.io/name: cloudflared, app.kubernetes.io/part-of: headlamp-plugins }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app.kubernetes.io/name: cloudflared } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: cloudflared, app.kubernetes.io/part-of: headlamp-plugins }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app.kubernetes.io/name: cloudflared } }
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2026.11.2
+          args: [tunnel, --no-autoupdate, --metrics, 0.0.0.0:2000, run]
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom: { secretKeyRef: { name: cloudflared-token, key: token } }
+          ports: [{ name: metrics, containerPort: 2000 }]
+          livenessProbe:
+            httpGet: { path: /ready, port: 2000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
