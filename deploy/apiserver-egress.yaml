@@ -3,7 +3,7 @@
 # entity. Needs Cilium (DOKS runs it): kubectl get crd ciliumnetworkpolicies.cilium.io
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
-metadata: { name: headlamp-to-apiserver, namespace: nis-headlamp }
+metadata: { name: headlamp-to-apiserver, namespace: headlamp }
 spec:
   endpointSelector: { matchLabels: { app.kubernetes.io/name: headlamp } }
   egress:
@@ -12,7 +12,7 @@ spec:
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
-metadata: { name: cloudflare-tunnel-manager-to-apiserver, namespace: nis-ingress }
+metadata: { name: cloudflare-tunnel-manager-to-apiserver, namespace: cloudflare-tunnel }
 spec:
   endpointSelector: { matchLabels: { app.kubernetes.io/name: cloudflare-tunnel-manager } }
   egress:

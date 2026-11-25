@@ -4,8 +4,12 @@ Rising Tide's [Headlamp](https://headlamp.dev) plugins, and the Headlamp image b
 
 | Plugin | What it does |
 |---|---|
-| [`cloudflare-tunnel-manager`](plugins/cloudflare-tunnel-manager) | Sidebar → **Cloudflare Tunnel**: the cluster's tunnel (start, stop, scale the `cloudflared` connector) and its `TunnelRoute`s (list with state, add, delete). Needs [cloudflare-tunnel-manager](https://github.com/Network-Integration-Specialists-Inc/nis-mcp/tree/main/platform/cloudflare-tunnel-manager) in the cluster. |
+| [`cloudflare-tunnel`](plugins/cloudflare-tunnel) | Sidebar → **Cloudflare Tunnel**: the cluster's tunnel (start, stop, scale the `cloudflared` connector) and its `TunnelRoute`s (list with state, add, delete). Needs the [`cloudflare-tunnel-manager`](backends/cloudflare-tunnel-manager) backend (installed by [`deploy/`](deploy)). |
 | [`do-firewall`](plugins/do-firewall) | Sidebar → **DO Firewall** (in a cluster and on the home screen): the DigitalOcean Kubernetes control-plane firewall allowlist, which DO's control panel does not show. Labels per address, NAT gateway locked, public-IPv4 validation, review before save. Needs each person's own DigitalOcean token. |
+
+| Backend | What it does |
+|---|---|
+| [`cloudflare-tunnel-manager`](backends/cloudflare-tunnel-manager) | Controller: creates or adopts the cluster's one Cloudflare Tunnel, writes its token for `cloudflared`, keeps routes and DNS in step with `TunnelRoute` objects. Image `ghcr.io/risingtidegroup/cloudflare-tunnel-manager`. |
 
 ## Deploy
 
@@ -30,6 +34,7 @@ serve every plugin, and Trivy-scans both images (MEDIUM or higher fails). Only p
 |---|---|---|
 | `ghcr.io/risingtidegroup/headlamp` | Headlamp from [`headlamp.env`](headlamp.env) with every plugin here baked into `/headlamp/plugins` | `<HEADLAMP_TAG>` (moves), `<HEADLAMP_TAG>-<headlamp sha7>-<this repo sha7>` (pinned) |
 | `ghcr.io/risingtidegroup/headlamp-plugins` | Every plugin under `/plugins/<name>/`, for an initContainer in any other Headlamp | `main`, `sha-<sha>` |
+| `ghcr.io/risingtidegroup/<backend>` | Each backend under `backends/` (tested, start-checked, Trivy-scanned) | `main`, `sha-<sha>` |
 
 A change to any plugin, or to `headlamp.env`, rebuilds both. Headlamp comes from
 [`RisingTideGroup/headlamp`](https://github.com/RisingTideGroup/headlamp) branch `rtg/main`:

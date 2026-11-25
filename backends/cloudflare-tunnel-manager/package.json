@@ -1,0 +1,16 @@
+{
+  "name": "cloudflare-tunnel-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keeps the cluster's ONE Cloudflare Tunnel in step with its TunnelRoute objects: tunnel routes, DNS records, and the cloudflared token Secret.",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

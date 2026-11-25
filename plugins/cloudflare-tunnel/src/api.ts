@@ -3,14 +3,15 @@
 // with the signed-in person's own token and RBAC: the plugin holds no credential, and the
 // Cloudflare API token never leaves the manager's Secret.
 //
-// Validation mirrors the manager's own rules (rules.ts), so the form refuses exactly what the
-// manager would mark Invalid. The CRD's patterns are the server-side backstop.
+// Validation is the manager's own (backends/cloudflare-tunnel-manager/src/rules.ts, imported,
+// not copied), so the form refuses exactly what the manager would mark Invalid. The CRD's
+// patterns are the server-side backstop.
 
-import { validateRoute, zoneFor } from './rules';
+import { validateRoute, zoneFor } from '../../../backends/cloudflare-tunnel-manager/src/rules.ts';
 
-export const GROUP = 'tunnel.nis.opsorganizer.com';
+export const GROUP = 'tunnel.risingtidegroup.github.io';
 export const VERSION = 'v1alpha1';
-export const NAMESPACE = 'nis-ingress';
+export const NAMESPACE = 'cloudflare-tunnel';
 export const MANAGER = 'cloudflare-tunnel-manager';
 export const CONNECTOR = 'cloudflared';
 

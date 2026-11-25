@@ -1,22 +1,20 @@
 # The two namespaces this bundle uses. The Cloudflare Tunnel plugin looks for the manager,
-# its ConfigMap, cloudflared and the TunnelRoutes in nis-ingress.
-#   nis-ingress    cloudflared (the tunnel connector) and cloudflare-tunnel-manager
-#   nis-headlamp   Headlamp
+# its ConfigMap, cloudflared and the TunnelRoutes in cloudflare-tunnel.
+#   cloudflare-tunnel   cloudflared (the tunnel connector) and cloudflare-tunnel-manager
+#   headlamp            Headlamp
 # Both enforce the `restricted` Pod Security Standard and start default-deny.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: nis-ingress
+  name: cloudflare-tunnel
   labels:
-    nis.opsorganizer.com/role: ingress
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: nis-headlamp
+  name: headlamp
   labels:
-    nis.opsorganizer.com/role: headlamp
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest

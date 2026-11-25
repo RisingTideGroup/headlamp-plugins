@@ -4,9 +4,9 @@ One bundle, built only from public images:
 
 | Workload | Namespace | Image |
 |---|---|---|
-| Headlamp, with every plugin in this repo (Cloudflare Tunnel, DigitalOcean, …) | `nis-headlamp` | `ghcr.io/risingtidegroup/headlamp:rtg-main` (this repo) |
-| `cloudflare-tunnel-manager`: creates or adopts the cluster's ONE tunnel, writes its token, keeps routes and DNS in step with `TunnelRoute` objects | `nis-ingress` | `ghcr.io/network-integration-specialists-inc/cloudflare-tunnel-manager:main` (nis-mcp) |
-| `cloudflared`: the tunnel connector; it carries the traffic | `nis-ingress` | `cloudflare/cloudflared:2026.11.2` |
+| Headlamp, with every plugin in this repo (Cloudflare Tunnel, DigitalOcean, …) | `headlamp` | `ghcr.io/risingtidegroup/headlamp:rtg-main` (this repo) |
+| `cloudflare-tunnel-manager`: creates or adopts the cluster's ONE tunnel, writes its token, keeps routes and DNS in step with `TunnelRoute` objects | `cloudflare-tunnel` | `ghcr.io/risingtidegroup/cloudflare-tunnel-manager:main` (this repo, `backends/`) |
+| `cloudflared`: the tunnel connector; it carries the traffic | `cloudflare-tunnel` | `cloudflare/cloudflared:2026.11.2` |
 
 Plus the `TunnelRoute` CRD, both namespaces (restricted Pod Security, default-deny), the network
 policies and the Cilium API-server egress.
@@ -20,22 +20,29 @@ policies and the Cilium API-server egress.
    ```
    Or, to layer your own changes, use this directory as a kustomize base:
    `https://github.com/RisingTideGroup/headlamp-plugins//deploy?ref=main`.
-3. Give the manager its Cloudflare API token (once, never in git):
+3. Name the tunnel and its zones (both required; the manager waits until they are set):
    ```bash
-   kubectl -n nis-ingress create secret generic cloudflare-api \
+   kubectl -n cloudflare-tunnel patch configmap cloudflare-tunnel-manager --type merge \
+     -p '{"data":{"TUNNEL_NAME":"<unique name, e.g. prod-nyc1>","TUNNEL_ZONES":"<example.com,example.net>"}}'
+   ```
+   Then give it the Cloudflare API token (once, never in git):
+   ```bash
+   kubectl -n cloudflare-tunnel create secret generic cloudflare-api \
      --from-literal=CLOUDFLARE_API_TOKEN=<token> --from-literal=CLOUDFLARE_ACCOUNT_ID=<account id>
    ```
    The token's permissions: Account → Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit,
    for the zones in `TUNNEL_ZONES` only.
 4. Route Headlamp through the tunnel. Until this exists Headlamp is reachable only with
-   `kubectl -n nis-headlamp port-forward svc/headlamp 4466`:
+   `kubectl -n headlamp port-forward svc/headlamp 4466`:
    ```yaml
-   apiVersion: tunnel.nis.opsorganizer.com/v1alpha1
+   apiVersion: tunnel.risingtidegroup.github.io/v1alpha1
    kind: TunnelRoute
-   metadata: { name: headlamp, namespace: nis-ingress }
-   spec: { hostname: <headlamp host>, service: http://headlamp.nis-headlamp.svc.cluster.local:4466 }
+   metadata: { name: headlamp, namespace: cloudflare-tunnel }
+   spec: { hostname: <headlamp host>, service: http://headlamp.headlamp.svc.cluster.local:4466 }
    ```
-   Put that hostname behind a Cloudflare Access policy. Further routes are added from
+   Put that hostname behind a Cloudflare Access policy.
+   Then restart the manager once so it reads the settings:
+   `kubectl -n cloudflare-tunnel rollout restart deploy/cloudflare-tunnel-manager`. Further routes are added from
    Headlamp → **Cloudflare Tunnel** → Add route.
 
 Until the manager has written Secret `cloudflared-token`, the `cloudflared` pods wait in
@@ -45,8 +52,8 @@ Until the manager has written Secret `cloudflared-token`, the `cloudflared` pods
 
 | Setting | Where | Default |
 |---|---|---|
-| Tunnel name | ConfigMap `cloudflare-tunnel-manager`, `TUNNEL_NAME` | `nis-cluster` |
-| Zones a route may use | same, `TUNNEL_ZONES` (comma-separated) | `opsorganizer.com,netintegration.net` |
+| Tunnel name (**required**; unique per Cloudflare account, an existing tunnel of that name is adopted) | ConfigMap `cloudflare-tunnel-manager`, `TUNNEL_NAME` | empty |
+| Zones a route may use (**required**) | same, `TUNNEL_ZONES` (comma-separated) | empty |
 | Reconcile interval | same, `RECONCILE_SECONDS` | `30` |
 | Connector replicas | Deployment `cloudflared`, or Headlamp → Cloudflare Tunnel → Scale / Stop | `2` |
 
@@ -56,8 +63,8 @@ re-apply of the bundle resets the connector to 2 replicas.
 ## Upgrades
 
 The Headlamp tag moves with every build of this repo and the pod pulls `Always`:
-`kubectl -n nis-headlamp rollout restart deploy/headlamp` picks up a new build. The manager's
-`main` tag works the same way (`kubectl -n nis-ingress rollout restart deploy/cloudflare-tunnel-manager`).
+`kubectl -n headlamp rollout restart deploy/headlamp` picks up a new build. The manager's
+`main` tag works the same way (`kubectl -n cloudflare-tunnel rollout restart deploy/cloudflare-tunnel-manager`).
 
 ## Editing
 

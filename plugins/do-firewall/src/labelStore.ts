@@ -66,7 +66,13 @@ export async function writeLabels(labels: LabelMap): Promise<void> {
       kind: 'Namespace',
       metadata: {
         name: NAMESPACE,
-        labels: { 'app.kubernetes.io/managed-by': 'headlamp-do-firewall' },
+        // Holds only a ConfigMap; still enforce the restricted Pod Security Standard like
+        // every other namespace, so nothing privileged can be scheduled into it later.
+        labels: {
+          'app.kubernetes.io/managed-by': 'headlamp-do-firewall',
+          'pod-security.kubernetes.io/enforce': 'restricted',
+          'pod-security.kubernetes.io/enforce-version': 'latest',
+        },
       },
     });
   }

@@ -1,0 +1,33 @@
+{
+  "name": "cloudflare-tunnel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headlamp plugin: the cluster's Cloudflare Tunnel (start, stop, scale cloudflared) and its TunnelRoutes (list, add, delete, state), for cloudflare-tunnel-manager.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "tsc": "tsc -p tsconfig.json",
+    "lint": "oxlint --deny-warnings"
+  },
+  "keywords": [
+    "headlamp",
+    "headlamp-plugin",
+    "kubernetes",
+    "cloudflare"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RisingTideGroup/headlamp-plugins",
+    "directory": "plugins/cloudflare-tunnel"
+  },
+  "devDependencies": {
+    "@mui/material": "5.18.0",
+    "@types/react": "18.3.31",
+    "esbuild": "0.28.2",
+    "oxlint": "1.93.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

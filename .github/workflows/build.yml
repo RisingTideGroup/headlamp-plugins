@@ -1,5 +1,7 @@
-# Every plugin under plugins/: install, audit, typecheck, lint, test, build. deploy/: the
-# rendered install.yaml must match its sources and pass the Kubernetes schemas.
+# Every plugin under plugins/: install, audit, typecheck, lint, test, build. Every backend under
+# backends/ (e.g. cloudflare-tunnel-manager): install, audit, typecheck, test, image build, start
+# check, Trivy; published as ghcr.io/<owner>/<backend>:<main|sha-…> on main. deploy/: the
+# rendered install.yaml must match its sources, pass the Kubernetes schemas and the CRD checks.
 # Headlamp (headlamp.env): its backend tests run on the exact commit being built.
 # Then both images are built, the Headlamp image is started and must list every plugin,
 # and both are Trivy-scanned (MEDIUM or higher fails). Only on main (or by hand), after
@@ -36,6 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plugins: ${{ steps.list.outputs.plugins }}
+      backends: ${{ steps.list.outputs.backends }}
       headlamp_repo: ${{ steps.env.outputs.HEADLAMP_REPO }}
       headlamp_ref: ${{ steps.env.outputs.HEADLAMP_REF }}
       headlamp_tag: ${{ steps.env.outputs.HEADLAMP_TAG }}
@@ -47,6 +50,9 @@ jobs:
           plugins=$(find plugins -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | xargs -n1 basename | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "$plugins"
+          backends=$(find backends -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' 2>/dev/null | xargs -rn1 basename | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
+          echo "backends=$backends" >> "$GITHUB_OUTPUT"
+          echo "$backends"
       - name: Read headlamp.env; resolve the ref to one commit
         id: env
         run: |
@@ -83,6 +89,97 @@ jobs:
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             deploy/install.yaml
+      - name: TunnelRoute CRD only routes to cluster Services
+        run: |
+          python3 - <<'PY'
+          import re, yaml
+          docs = [d for d in yaml.safe_load_all(open('deploy/install.yaml')) if d]
+          crd = next(d for d in docs if d['kind'] == 'CustomResourceDefinition')
+          v = crd['spec']['versions'][0]
+          assert crd['metadata']['name'] == 'tunnelroutes.tunnel.risingtidegroup.github.io'
+          assert v['subresources'] == {'status': {}}
+          props = v['schema']['openAPIV3Schema']['properties']['spec']['properties']
+          host, svc = re.compile(props['hostname']['pattern']), re.compile(props['service']['pattern'])
+          assert host.match('portal.example.com') and host.match('*.example.com') and not host.match('Bad_Host')
+          assert svc.match('http://portal.apps.svc.cluster.local:3000') and svc.match('http_status:404')
+          assert not svc.match('http://evil.example.com:80') and not svc.match('http://169.254.169.254:80')
+          print('CRD ok')
+          PY
+
+  backend:
+    needs: discover
+    if: needs.discover.outputs.backends != '[]'
+    name: backend (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJson(needs.discover.outputs.backends) }}
+    env:
+      DIR: backends/${{ matrix.backend }}
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install, audit, typecheck, test
+        working-directory: ${{ env.DIR }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --audit-level=moderate
+          npm run typecheck
+          npm test
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/${{ matrix.backend }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.DIR }}
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE }}:main
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: "Start check: non-root, and refuses to run without its settings"
+        run: |
+          set -uo pipefail
+          uid=$(docker run --rm --entrypoint id "$IMAGE:main" -u)
+          [ "$uid" != "0" ] || { echo "::error::image runs as root"; exit 1; }
+          out=$(docker run --rm "$IMAGE:main" 2>&1); code=$?
+          echo "$out"
+          [ "$code" = 2 ] && grep -q 'is required' <<<"$out" || { echo "::error::expected exit 2 '<NAME> is required', got $code"; exit 1; }
+      - name: Install Trivy (pinned binary)
+        run: |
+          bin="$RUNNER_TEMP/trivy"; mkdir -p "$bin"
+          curl -sSfL -o "$bin/trivy.tgz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  $bin/trivy.tgz" | sha256sum -c -
+          tar -xzf "$bin/trivy.tgz" -C "$bin" trivy
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Trivy (MEDIUM or higher fails)
+        run: |
+          args=(image --scanners vuln --severity MEDIUM,HIGH,CRITICAL --exit-code 1 --image-src docker)
+          if [ -f .trivyignore ]; then args+=(--ignorefile .trivyignore); fi
+          trivy "${args[@]}" "$IMAGE:main"
+      - uses: docker/login-action@v3
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        run: |
+          docker push "$IMAGE:main"
+          docker push "$IMAGE:sha-${{ github.sha }}"
 
   plugin:
     needs: discover

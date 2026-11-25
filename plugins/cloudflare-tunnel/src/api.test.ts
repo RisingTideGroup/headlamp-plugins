@@ -12,7 +12,7 @@ import {
   tunnelState,
 } from './api';
 
-const zones = ['opsorganizer.com', 'netintegration.net'];
+const zones = ['example.org', 'example.net'];
 
 function fakeRequest(responses: Record<string, any> = {}) {
   const calls: { path: string; init?: RequestInit }[] = [];
@@ -26,27 +26,27 @@ function fakeRequest(responses: Record<string, any> = {}) {
 describe('checkRoute', () => {
   it('accepts a cluster service in an allowed zone', () => {
     expect(
-      checkRoute({ name: 'portal', hostname: 'portal.opsorganizer.com', service: 'http://portal.nis-system.svc.cluster.local:3000' }, zones)
+      checkRoute({ name: 'portal', hostname: 'portal.example.org', service: 'http://portal.apps.svc.cluster.local:3000' }, zones)
     ).toBeNull();
-    expect(checkRoute({ name: 'mcp', hostname: '*.opsorganizer.com', service: 'http_status:404' }, zones)).toBeNull();
+    expect(checkRoute({ name: 'mcp', hostname: '*.example.org', service: 'http_status:404' }, zones)).toBeNull();
   });
 
   it('refuses outside origins, other zones and bad names', () => {
-    expect(checkRoute({ name: 'x', hostname: 'a.opsorganizer.com', service: 'http://evil.example.com:80' }, zones)).toMatch(/service/);
+    expect(checkRoute({ name: 'x', hostname: 'a.example.org', service: 'http://evil.example.com:80' }, zones)).toMatch(/service/);
     expect(checkRoute({ name: 'x', hostname: 'a.example.com', service: 'http_status:404' }, zones)).toMatch(/zone/);
-    expect(checkRoute({ name: 'Bad_Name', hostname: 'a.opsorganizer.com', service: 'http_status:404' }, zones)).toMatch(/name/);
+    expect(checkRoute({ name: 'Bad_Name', hostname: 'a.example.org', service: 'http_status:404' }, zones)).toMatch(/name/);
   });
 });
 
 describe('API calls', () => {
   it('lists routes sorted, with Pending for unreconciled ones', async () => {
     const { request } = fakeRequest({
-      '/apis/tunnel.nis.opsorganizer.com/v1alpha1/namespaces/nis-ingress/tunnelroutes': {
+      '/apis/tunnel.risingtidegroup.github.io/v1alpha1/namespaces/cloudflare-tunnel/tunnelroutes': {
         items: [
-          { metadata: { name: 'b' }, spec: { hostname: 'b.opsorganizer.com', service: 'http_status:404' } },
+          { metadata: { name: 'b' }, spec: { hostname: 'b.example.org', service: 'http_status:404' } },
           {
             metadata: { name: 'a' },
-            spec: { hostname: 'a.opsorganizer.com', service: 'http_status:404' },
+            spec: { hostname: 'a.example.org', service: 'http_status:404' },
             status: { state: 'Conflict', message: 'not ours' },
           },
         ],
@@ -61,19 +61,19 @@ describe('API calls', () => {
 
   it('reads the zones from the manager ConfigMap', async () => {
     const { request } = fakeRequest({
-      '/api/v1/namespaces/nis-ingress/configmaps/cloudflare-tunnel-manager': {
-        data: { TUNNEL_NAME: 'nis-cluster', TUNNEL_ZONES: ' Opsorganizer.com, netintegration.net ,' },
+      '/api/v1/namespaces/cloudflare-tunnel/configmaps/cloudflare-tunnel-manager': {
+        data: { TUNNEL_NAME: 'prod-nyc1', TUNNEL_ZONES: ' Example.org, example.net ,' },
       },
     });
-    expect(await getSettings(request)).toEqual({ tunnelName: 'nis-cluster', zones });
+    expect(await getSettings(request)).toEqual({ tunnelName: 'prod-nyc1', zones });
   });
 
   it('creates a normalized TunnelRoute and refuses an invalid one without calling the API', async () => {
     const { request, calls } = fakeRequest();
-    await createRoute(request, { name: 'hl', hostname: ' HL.opsorganizer.com ', service: 'http://headlamp.nis-headlamp.svc.cluster.local:4466' }, zones);
+    await createRoute(request, { name: 'hl', hostname: ' HL.example.org ', service: 'http://headlamp.headlamp.svc.cluster.local:4466' }, zones);
     expect(calls[0]!.init!.method).toBe('POST');
     expect(JSON.parse(String(calls[0]!.init!.body))).toEqual(
-      routeObject({ name: 'hl', hostname: 'hl.opsorganizer.com', service: 'http://headlamp.nis-headlamp.svc.cluster.local:4466' })
+      routeObject({ name: 'hl', hostname: 'hl.example.org', service: 'http://headlamp.headlamp.svc.cluster.local:4466' })
     );
     await expect(createRoute(request, { name: 'x', hostname: 'x.example.com', service: 'http_status:404' }, zones)).rejects.toThrow();
     expect(calls).toHaveLength(1);
@@ -90,7 +90,7 @@ describe('API calls', () => {
   it('scales the connector through the scale subresource, 0..10 only', async () => {
     const { request, calls } = fakeRequest();
     await scaleConnector(request, 0);
-    expect(calls[0]!.path).toBe('/apis/apps/v1/namespaces/nis-ingress/deployments/cloudflared/scale');
+    expect(calls[0]!.path).toBe('/apis/apps/v1/namespaces/cloudflare-tunnel/deployments/cloudflared/scale');
     expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ spec: { replicas: 0 } });
     await expect(scaleConnector(request, 11)).rejects.toThrow();
     await expect(scaleConnector(request, 1.5)).rejects.toThrow();

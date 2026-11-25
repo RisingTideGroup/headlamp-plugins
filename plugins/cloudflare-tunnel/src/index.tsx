@@ -91,9 +91,10 @@ function TunnelCard(props: { data: PageData; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const desired = connector?.replicas ?? 0;
   React.useEffect(() => {
-    if (connector && connector.replicas > 0) setReplicas(String(connector.replicas));
-  }, [connector?.replicas]);
+    if (desired > 0) setReplicas(String(desired));
+  }, [desired]);
 
   async function scale(n: number) {
     setBusy(true);
@@ -337,7 +338,7 @@ function TunnelPage() {
             </Typography>
           ))}
           <Typography variant="body2">
-            Is cloudflare-tunnel-manager installed in {NAMESPACE}, and may your account read it?
+            Is cloudflare-tunnel-manager installed in {NAMESPACE} (deploy/install.yaml), and may your account read it?
           </Typography>
         </SectionBox>
       )}

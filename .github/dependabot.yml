@@ -1,14 +1,21 @@
-# Weekly dependency updates: each plugin's npm tree and the workflow actions.
+# Weekly dependency updates: each plugin's and backend's npm tree, the backends' base images,
+# and the workflow actions.
 version: 2
 updates:
   - package-ecosystem: npm
     directories:
       - /plugins/*
+      - /backends/*
     schedule:
       interval: weekly
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+  - package-ecosystem: docker
+    directories:
+      - /backends/*
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

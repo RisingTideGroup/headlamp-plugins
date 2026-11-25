@@ -10,7 +10,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared
-  namespace: nis-ingress
+  namespace: cloudflare-tunnel
   labels: { app.kubernetes.io/name: cloudflared, app.kubernetes.io/part-of: headlamp-plugins }
 spec:
   replicas: 2
