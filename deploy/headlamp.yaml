@@ -1,0 +1,57 @@
+# Headlamp, built from RisingTideGroup/headlamp@rtg/main (upstream main + our DigitalOcean changes:
+# /me for opaque tokens via SelfSubjectReview, replayable proxied bodies) with our plugins
+# (Cloudflare Tunnel, …) baked into /headlamp/plugins, by RisingTideGroup/headlamp-plugins
+# (its headlamp.env picks the Headlamp source). The tag moves with each plugin change, so the
+# image is pulled Always: `kubectl -n nis-headlamp rollout restart deploy/headlamp` picks up
+# a new build. Exposed only through the tunnel, behind Cloudflare
+# Access. Its own ServiceAccount is bound to NO role: -in-cluster mode reads that token only
+# to locate the API server; people sign in with their own token and act with their own RBAC.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: headlamp, namespace: nis-headlamp }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: headlamp
+  namespace: nis-headlamp
+  labels: { app.kubernetes.io/name: headlamp, app.kubernetes.io/part-of: headlamp-plugins }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: headlamp } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: headlamp, app.kubernetes.io/part-of: headlamp-plugins }
+    spec:
+      serviceAccountName: headlamp
+      securityContext:
+        runAsNonRoot: true
+        # The image's `headlamp` user (alpine adduser -S => uid 100). the plugins repo's build prints
+        # the uid of each build; keep this in step with it.
+        runAsUser: 100
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: headlamp
+          image: ghcr.io/risingtidegroup/headlamp:rtg-main
+          imagePullPolicy: Always
+          args: [-in-cluster, -plugins-dir=/headlamp/plugins]
+          ports: [{ name: http, containerPort: 4466 }]
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 64Mi } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: headlamp, namespace: nis-headlamp }
+spec:
+  selector: { app.kubernetes.io/name: headlamp }
+  ports: [{ name: http, port: 4466, targetPort: http }]

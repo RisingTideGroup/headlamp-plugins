@@ -1,0 +1,159 @@
+# cloudflare-tunnel-manager — keeps the cluster's ONE Cloudflare Tunnel in step with its
+# TunnelRoutes (source: Network-Integration-Specialists-Inc/nis-mcp,
+# platform/cloudflare-tunnel-manager). It creates or adopts the tunnel named TUNNEL_NAME, writes the
+# tunnel's token into Secret cloudflared-token (which cloudflared.yaml runs with), pushes the
+# routes to the tunnel, and creates/deletes the DNS records — its own only.
+#
+# A route, editable from Headlamp (Custom Resources → TunnelRoute):
+#   apiVersion: tunnel.nis.opsorganizer.com/v1alpha1
+#   kind: TunnelRoute
+#   metadata: { name: portal, namespace: nis-ingress }
+#   spec: { hostname: portal.example.com, service: http://portal.nis-system.svc.cluster.local:3000 }
+#
+# Secret (never in git), created once by someone with Cloudflare access:
+#   kubectl -n nis-ingress create secret generic cloudflare-api \
+#     --from-literal=CLOUDFLARE_API_TOKEN=<token> --from-literal=CLOUDFLARE_ACCOUNT_ID=<account id>
+# The token's permissions: Account → Cloudflare Tunnel: Edit; Zone → Zone: Read, DNS: Edit —
+# restricted to the zones in TUNNEL_ZONES.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: tunnelroutes.tunnel.nis.opsorganizer.com
+spec:
+  group: tunnel.nis.opsorganizer.com
+  scope: Namespaced
+  names: { kind: TunnelRoute, plural: tunnelroutes, singular: tunnelroute, shortNames: [tr] }
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources: { status: {} }
+      additionalPrinterColumns:
+        - { name: Hostname, type: string, jsonPath: .spec.hostname }
+        - { name: Service, type: string, jsonPath: .spec.service }
+        - { name: State, type: string, jsonPath: .status.state }
+        - { name: Message, type: string, jsonPath: .status.message, priority: 1 }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [hostname, service]
+              properties:
+                hostname:
+                  type: string
+                  description: Public hostname (or *.zone wildcard) in an allowed zone.
+                  maxLength: 253
+                  pattern: '^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
+                service:
+                  type: string
+                  description: A cluster Service, http(s)://<service>.<namespace>.svc.cluster.local:<port>, or http_status:404.
+                  maxLength: 300
+                  pattern: '^(https?://[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.svc\.cluster\.local:[0-9]{1,5}|http_status:404)$'
+                path:
+                  type: string
+                  description: Optional path regular expression, e.g. ^/api.
+                  maxLength: 200
+            status:
+              type: object
+              properties:
+                state: { type: string, enum: [Ready, Invalid, Conflict] }
+                message: { type: string }
+                lastReconciled: { type: string }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: cloudflare-tunnel-manager, namespace: nis-ingress }
+---
+# Least privilege: read routes, write their status, and manage ONE Secret by name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: cloudflare-tunnel-manager, namespace: nis-ingress }
+rules:
+  - apiGroups: [tunnel.nis.opsorganizer.com]
+    resources: [tunnelroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [tunnel.nis.opsorganizer.com]
+    resources: [tunnelroutes/status]
+    verbs: [get, patch, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cloudflared-token]
+    verbs: [get, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: cloudflare-tunnel-manager, namespace: nis-ingress }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: cloudflare-tunnel-manager }
+subjects:
+  - { kind: ServiceAccount, name: cloudflare-tunnel-manager, namespace: nis-ingress }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: cloudflare-tunnel-manager, namespace: nis-ingress }
+data:
+  TUNNEL_NAME: nis-cluster
+  TUNNEL_ZONES: opsorganizer.com,netintegration.net
+  TOKEN_SECRET_NAME: cloudflared-token
+  RECONCILE_SECONDS: "30"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflare-tunnel-manager
+  namespace: nis-ingress
+  labels: { app.kubernetes.io/name: cloudflare-tunnel-manager, app.kubernetes.io/part-of: headlamp-plugins }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: cloudflare-tunnel-manager } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: cloudflare-tunnel-manager, app.kubernetes.io/part-of: headlamp-plugins }
+    spec:
+      serviceAccountName: cloudflare-tunnel-manager
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: cloudflare-tunnel-manager
+          image: ghcr.io/network-integration-specialists-inc/cloudflare-tunnel-manager:main
+          envFrom:
+            - configMapRef: { name: cloudflare-tunnel-manager }
+            - secretRef: { name: cloudflare-api }
+          env:
+            - { name: NODE_EXTRA_CA_CERTS, value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          ports: [{ name: health, containerPort: 8080 }]
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+# Reaches the Cloudflare API (internet) and the API server (apiserver-egress.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: cloudflare-tunnel-manager-egress, namespace: nis-ingress }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: cloudflare-tunnel-manager } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+      ports: [{ protocol: TCP, port: 443 }]

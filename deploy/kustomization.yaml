@@ -1,0 +1,15 @@
+# Headlamp (our image, plugins baked in) + the cluster's Cloudflare Tunnel (cloudflared and
+# cloudflare-tunnel-manager), in one apply:
+#   kubectl apply -k https://github.com/RisingTideGroup/headlamp-plugins//deploy?ref=main
+# or the rendered single file:
+#   kubectl apply -f https://raw.githubusercontent.com/RisingTideGroup/headlamp-plugins/main/deploy/install.yaml
+# install.yaml is `kubectl kustomize deploy`; CI fails if it is out of date.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - network-policies.yaml
+  - apiserver-egress.yaml
+  - cloudflared.yaml
+  - cloudflare-tunnel-manager.yaml
+  - headlamp.yaml

@@ -7,6 +7,17 @@ Rising Tide's [Headlamp](https://headlamp.dev) plugins, and the Headlamp image b
 | [`cloudflare-tunnel-manager`](plugins/cloudflare-tunnel-manager) | Sidebar → **Cloudflare Tunnel**: the cluster's tunnel (start, stop, scale the `cloudflared` connector) and its `TunnelRoute`s (list with state, add, delete). Needs [cloudflare-tunnel-manager](https://github.com/Network-Integration-Specialists-Inc/nis-mcp/tree/main/platform/cloudflare-tunnel-manager) in the cluster. |
 | [`do-firewall`](plugins/do-firewall) | Sidebar → **DO Firewall** (in a cluster and on the home screen): the DigitalOcean Kubernetes control-plane firewall allowlist, which DO's control panel does not show. Labels per address, NAT gateway locked, public-IPv4 validation, review before save. Needs each person's own DigitalOcean token. |
 
+## Deploy
+
+[`deploy/`](deploy) installs Headlamp (this repo's image, every plugin included) and the
+cluster's Cloudflare Tunnel (`cloudflared` + `cloudflare-tunnel-manager`) in one apply:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/RisingTideGroup/headlamp-plugins/main/deploy/install.yaml
+```
+
+Then create the `cloudflare-api` Secret and a route for Headlamp. See [deploy/README.md](deploy/README.md).
+
 ## Images
 
 Built by [`.github/workflows/build.yml`](.github/workflows/build.yml). Every run (pull requests
