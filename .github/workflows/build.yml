@@ -44,7 +44,7 @@ jobs:
       headlamp_tag: ${{ steps.env.outputs.HEADLAMP_TAG }}
       headlamp_sha: ${{ steps.env.outputs.HEADLAMP_SHA }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: list
         run: |
           plugins=$(find plugins -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | xargs -n1 basename | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -73,7 +73,7 @@ jobs:
       KUBECTL_VERSION: v1.34.1
       KUBECONFORM_VERSION: v0.7.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install kubectl and kubeconform
         run: |
           curl -sSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
@@ -122,7 +122,7 @@ jobs:
       DIR: backends/${{ matrix.backend }}
       PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -193,7 +193,7 @@ jobs:
       run:
         working-directory: plugins/${{ matrix.plugin }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -226,7 +226,7 @@ jobs:
     name: headlamp backend tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ needs.discover.outputs.headlamp_repo }}
           ref: ${{ needs.discover.outputs.headlamp_sha }}
@@ -255,10 +255,10 @@ jobs:
       PLUGINS: ${{ needs.discover.outputs.plugins }}
       PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: plugins-repo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.HEADLAMP_REPO }}
           ref: ${{ env.HEADLAMP_SHA }}
