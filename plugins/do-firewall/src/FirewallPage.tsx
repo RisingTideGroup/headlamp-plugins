@@ -107,10 +107,14 @@ export function FirewallPage() {
       const cluster = await getCluster(token, clusterId);
       const [nat, labelsResult] = await Promise.all([
         natEgressForVpc(token, cluster.vpc_uuid),
-        readLabels().then(
-          labels => ({ labels, labelsError: null as string | null }),
-          err => ({ labels: {}, labelsError: message(err) })
-        ),
+        // Labels live in the cluster. On the home-screen page there is no cluster to ask
+        // (a request would reach Headlamp's own web server and return its HTML).
+        headlampCluster
+          ? readLabels().then(
+              labels => ({ labels, labelsError: null as string | null }),
+              err => ({ labels: {}, labelsError: message(err) })
+            )
+          : Promise.resolve({ labels: {}, labelsError: null as string | null }),
       ]);
       const doAddresses = (cluster.control_plane_firewall?.allowed_addresses ?? []).map(
         normalizeStored
@@ -132,7 +136,7 @@ export function FirewallPage() {
     } finally {
       setBusy(false);
     }
-  }, [token, clusterId]);
+  }, [token, clusterId, headlampCluster]);
 
   useEffect(() => {
     void load();
@@ -196,10 +200,14 @@ export function FirewallPage() {
         );
       }
       let labelNote = '';
-      try {
-        await writeLabels(labelsFor(entries));
-      } catch (err) {
-        labelNote = ` Labels were not saved to ${NAMESPACE}/${CONFIGMAP}: ${message(err)}`;
+      if (headlampCluster) {
+        try {
+          await writeLabels(labelsFor(entries));
+        } catch (err) {
+          labelNote = ` Labels were not saved to ${NAMESPACE}/${CONFIGMAP}: ${message(err)}`;
+        }
+      } else {
+        labelNote = ' Labels are kept in the cluster; open DO Firewall inside the cluster to save them.';
       }
       setReviewOpen(0);
       setNotice(
@@ -284,6 +292,13 @@ export function FirewallPage() {
                 ? loaded.nat.map(n => <code key={n.ip}>{n.ip} </code>)
                 : 'none found'}
             </Typography>
+            {!headlampCluster && (
+              <Alert severity="info">
+                Opened outside a cluster: addresses come straight from DigitalOcean, without their
+                labels (those are kept in the cluster, {NAMESPACE}/{CONFIGMAP}). Open DO Firewall
+                from inside the cluster to see and edit them.
+              </Alert>
+            )}
             {loaded.labelsError && (
               <Alert severity="warning">
                 Labels could not be read from {NAMESPACE}/{CONFIGMAP} ({loaded.labelsError}).
