@@ -5,7 +5,7 @@ Headlamp. DigitalOcean's control panel has no screen for it; otherwise it is API
 
 **Where:**
 - Inside a cluster: sidebar → **DO Firewall** (`/c/<cluster>/do-firewall`).
-- Break-glass, no cluster needed: **Home → DO Firewall** (`/do-firewall`). Use it when the
+- Break-glass, no cluster needed: **Home → DO Firewall** (`/do-firewall-home`). Use it when the
   Headlamp host's IP has fallen off the allowlist and Headlamp can no longer reach the
   cluster: pick the DO cluster, add the IP, save. Labels live in the cluster, so they show a
   warning there and are not saved; the addresses are.
