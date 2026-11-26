@@ -20,7 +20,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CfTunnel,
   checkRule,
@@ -370,7 +370,9 @@ function RuleDialog(props: {
   onClose: (changed: boolean) => void;
 }) {
   const { editing, zones, services } = props;
-  const initial = useMemo(() => {
+  // Filled once, when the dialog opens (it is mounted only while open). The page refreshes its
+  // data every few seconds; that must never touch what is being typed here.
+  const [form, setForm] = useState(() => {
     const split = editing ? splitHostname(editing.hostname, zones) : { subdomain: '', zone: zones[0] ?? '' };
     const svc = editing ? parseServiceUrl(editing.service) : null;
     return {
@@ -381,17 +383,9 @@ function RuleDialog(props: {
       https: svc?.https ?? false,
       path: editing?.path ?? '',
     };
-  }, [editing, zones]);
-  const [form, setForm] = useState(initial);
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (props.open) {
-      setForm(initial);
-      setError(null);
-    }
-  }, [props.open, initial]);
 
   const svc = services?.find(s => `${s.namespace}/${s.name}` === form.service) ?? null;
   const rule: RuleInput | null =
@@ -507,23 +501,27 @@ function RulesCard(props: { routes: TunnelRoute[] | null; status: ManagerStatus;
   const [services, setServices] = useState<ServiceRef[] | null>(null);
   const [zones, setZones] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const passZones = props.status.lastPass?.zones;
+  // Compare by value: every refresh brings a new array with the same zones.
+  const passZones = (props.status.lastPass?.zones ?? []).join(',');
   const accountId = props.status.settings.accountId;
+  const setZonesIfChanged = useCallback((next: string[]) => {
+    setZones(prev => (prev.join(',') === next.join(',') ? prev : next));
+  }, []);
 
   useEffect(() => {
-    if (passZones?.length) {
-      setZones(passZones);
+    if (passZones) {
+      setZonesIfChanged(passZones.split(','));
       return;
     }
     if (!props.status.tokenSet || !/^[0-9a-f]{32}$/.test(accountId)) return;
     let live = true;
     listZones(request, accountId)
-      .then(z => live && setZones(z.map(x => x.name)))
+      .then(z => live && setZonesIfChanged(z.map(x => x.name)))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [passZones, props.status.tokenSet, accountId]);
+  }, [passZones, props.status.tokenSet, accountId, setZonesIfChanged]);
 
   function open(editing: TunnelRoute | null) {
     setDialog({ open: true, editing });
@@ -617,6 +615,7 @@ function RulesCard(props: { routes: TunnelRoute[] | null; status: ManagerStatus;
           </Typography>
         )}
       </Stack>
+      {dialog.open && (
       <RuleDialog
         open={dialog.open}
         editing={dialog.editing}
@@ -628,6 +627,7 @@ function RulesCard(props: { routes: TunnelRoute[] | null; status: ManagerStatus;
           if (changed) props.onChanged();
         }}
       />
+      )}
     </SectionBox>
   );
 }
